@@ -139,7 +139,7 @@ def parse_accession():
 
 def extract_acc_children(tax_id):
     """
-    Extracts all sequence accessions corresponding to all children of tax_id
+    Extracts sequence accessions including the children of the given tax_id.
     """
     # tax_id = 1279
     query = (Names
@@ -163,7 +163,7 @@ def extract_acc_children(tax_id):
 
 def extract_acc(tax_id):
     """
-    Extracts all sequence accessions corresponding to a taxid
+    Extracts sequence accessions corresponding to a taxid.
     """
     query = Accessions.select(Accessions.acc, Accessions.tax_id).where(Accessions.tax_id == tax_id)
 
