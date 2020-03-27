@@ -2,11 +2,8 @@ from peewee import *
 import os, csv
 import itertools
 import plac, sys
-#
-# if os.path.exists('test.db'):
-#     os.remove('test.db')
 
-dbname="test.db"
+dbname = "test.db"
 db = SqliteDatabase(dbname)
 
 LIMIT = 2000
@@ -144,13 +141,12 @@ def extract_acc_children(tax_id):
     """
     Extracts all sequence accessions corresponding to all children of tax_id
     """
-    #tax_id = 1279
-
+    # tax_id = 1279
     query = (Names
              .select(Names.name, Nodes.parent_id, Nodes.tax_id, Accessions.acc)
-             .join_from(Names, Nodes)
-             .where(Nodes.parent_id == tax_id)
-             .join_from(Nodes, Accessions))
+             .join(Nodes)
+             .where((Nodes.parent_id == tax_id) | (Nodes.tax_id == tax_id))
+             .join(Accessions))
 
     if not query.exists():
         print(f"No children or No accessions found for {tax_id}")
@@ -158,20 +154,18 @@ def extract_acc_children(tax_id):
 
     cursor = db.execute(query)
 
-    if not query.exists:
-        print(f"No accessions found for {tax_id}")
-        sys.exit()
+    header = ['name', 'parent', 'taxid', 'accession']
+    print("\t".join(header))
 
     for name, parent_id, tax_id, acc in cursor:
-        print(name, parent_id, tax_id, acc)
+        print("\t".join([name, str(parent_id), str(tax_id), str(acc)]))
 
 
 def extract_acc(tax_id):
     """
     Extracts all sequence accessions corresponding to a taxid
     """
-
-    query = Accessions.select(Accessions.acc, Accessions.tax_id).where(Accessions.tax_id==tax_id)
+    query = Accessions.select(Accessions.acc, Accessions.tax_id).where(Accessions.tax_id == tax_id)
 
     if not query.exists():
         print(f"No accessions found for {tax_id}")
@@ -179,8 +173,11 @@ def extract_acc(tax_id):
 
     cursor = db.execute(query)
 
+    header = ['acession', 'taxid']
+    print("\t".join(header))
+
     for acc, tid in cursor:
-        print(acc, tid)
+        print("\t".join([str(acc), str(tid)]))
 
 
 def create_populate():
@@ -190,17 +187,16 @@ def create_populate():
     parse_accession()
 
 
-#Plac annotations:
+# Plac annotations:
 #
 # (help, kind, abbrev, type, choices, metavar)
 #
 
 @plac.annotations(
     taxid=("Input taxid"),
-    child=("Specify to extract accessions including the children of taxid","flag", "c"),
+    child=("Specify to extract accessions including the children of taxid", "flag", "c"),
 )
-def run(taxid,child=False):
-
+def run(taxid, child=False):
     "Prints all accessions corresponding to taxid"
 
     if not os.path.exists(dbname):
@@ -215,9 +211,8 @@ def run(taxid,child=False):
 
 
 if __name__ == "__main__":
-    #create_populate()
-    #extract_acc(tax_id=1282)
-    #extract_acc_children(tax_id=1279)
+    # create_populate()
+    # extract_acc(tax_id=1282)
+    # extract_acc_children(tax_id=1279)
 
     plac.call(run)
-
