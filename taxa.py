@@ -10,46 +10,36 @@ LIMIT = 2000
 SIZE = 1000
 
 
-class Nodes(Model):
+class BaseModel(Model):
+    class Meta:
+        database = db
+
+
+class Nodes(BaseModel):
     tax_id = IntegerField(primary_key=True)
     parent_id = IntegerField()
     rank = CharField()
     embl_code = CharField()
     division_id = CharField()
 
-    class Meta:
-        database = db
 
-
-class Names(Model):
-    tax_id = ForeignKeyField(Nodes, backref="names")
+class Names(BaseModel):
     name = CharField()
-
-    class Meta:
-        database = db
+    taxa = ForeignKeyField(Nodes)
 
 
-class Accessions(Model):
+class Accessions(BaseModel):
     acc = CharField(primary_key=True)
     acc_version = CharField()
-    tax_id = ForeignKeyField(Nodes, backref="accession")
     gi_id = IntegerField()
-
-    class Meta:
-        database = db
+    taxa = ForeignKeyField(Nodes)
 
 
 def create():
     # Create Index
-    idx1 = Names.index(Names.tax_id)
-    Names.add_index(idx1)
-    idx2 = Names.index(Names.name)
-    Names.add_index(idx2)
-    #
-    idx3 = Accessions.index(Accessions.acc)
-    Accessions.add_index(idx3)
-    idx4 = Accessions.index(Accessions.tax_id)
-    Accessions.add_index(idx4)
+    Nodes.add_index(Nodes.rank)
+    Names.add_index(Names.name)
+    Accessions.add_index(Accessions.acc)
 
     db.connect()
     db.create_tables([Nodes, Names, Accessions])
@@ -70,8 +60,18 @@ def parse(fname, delimiter="\t"):
     return stream
 
 
-def parse_nodes():
-    fname = path(".", "data", "test.dmp")
+def load(klass, source, size):
+    with db.atomic():
+        num = 0
+        for step, batch in enumerate(chunked(source, size)):
+            num += len(batch)
+            print(f"\r*** loading {num:,d} rows", end='')
+            klass.insert_many(batch).execute()
+    print("")
+
+
+def parse_nodes(fname):
+    fname = path(".", "data", fname)
     stream = parse(fname, "|")
     stream = itertools.islice(stream, LIMIT)
 
@@ -89,18 +89,8 @@ def parse_nodes():
     load(Nodes, source, size=SIZE)
 
 
-def load(klass, source, size):
-    with db.atomic():
-        num = 0
-        for step, batch in enumerate(chunked(source, size)):
-            num += len(batch)
-            print(f"\r*** loading {num:,d} rows", end='')
-            klass.insert_many(batch).execute()
-    print("")
-
-
-def parse_names():
-    fname = path(".", "data", "names.dmp")
+def parse_names(fname):
+    fname = path(".", "data", fname)
     stream = parse(fname, "|")
     stream = filter(lambda x: x[3] == "scientific name", stream)
     stream = itertools.islice(stream, LIMIT)
@@ -108,7 +98,7 @@ def parse_names():
     def generate():
         for row in stream:
             tax_id, name = int(row[0]), row[1]
-            entry = dict(tax_id=tax_id, name=name)
+            entry = dict(taxa=tax_id, name=name)
             yield entry
 
     source = generate()
@@ -117,8 +107,8 @@ def parse_names():
     load(Names, source, size=SIZE)
 
 
-def parse_accession():
-    fname = path(".", "data", "acc.txt")
+def parse_accession(fname):
+    fname = path(".", "data", fname)
     stream = parse(fname, "\t")
     stream = itertools.islice(stream, LIMIT)
 
@@ -128,7 +118,7 @@ def parse_accession():
             acc, acc_version = row[0], row[1]
             tax_id, gi_id = int(row[2]), int(row[3])
             entry = dict(acc=acc, acc_version=acc_version,
-                         tax_id=tax_id, gi_id=gi_id)
+                         taxa=tax_id, gi_id=gi_id)
             yield entry
 
     source = generate()
@@ -161,30 +151,55 @@ def extract_acc_children(tax_id):
         print("\t".join([name, str(parent_id), str(tax_id), str(acc)]))
 
 
+def extract_names(tax_id):
+
+    # Get Name, taxid
+    query = (Names
+             .select(Nodes, Names)
+             .join(Nodes)
+             .where(Names.taxa.tax_id == tax_id)
+
+             )
+    if not query.exists():
+        print(f"No accessions found for {tax_id}")
+        sys.exit()
+
+    for c in query:
+        print(c.name, c.taxa.tax_id)
+
+
 def extract_acc(tax_id):
     """
     Extracts sequence accessions corresponding to a taxid.
     """
-    query = Accessions.select(Accessions.acc, Accessions.tax_id).where(Accessions.tax_id == tax_id)
+
+    query = (Accessions
+             .select(Nodes, Accessions)
+             .join( Nodes)
+             .where(Accessions.taxa.tax_id == tax_id)
+             )
 
     if not query.exists():
         print(f"No accessions found for {tax_id}")
         sys.exit()
 
-    cursor = db.execute(query)
-
     header = ['acession', 'taxid']
     print("\t".join(header))
 
-    for acc, tid in cursor:
+    for c in query:
+        tid, acc = str(c.taxa.tax_id), str(c.acc)
         print("\t".join([str(acc), str(tid)]))
 
 
 def create_populate():
+    nodes = "test_nodes.dmp"
+    names = "test_names.dmp"
+    acc = "acc.txt"
+
     create()
-    parse_nodes()
-    parse_names()
-    parse_accession()
+    parse_nodes(nodes)
+    parse_names(names)
+    parse_accession(acc)
 
 
 # Plac annotations:
@@ -211,8 +226,8 @@ def run(taxid, child=False):
 
 
 if __name__ == "__main__":
-    # create_populate()
-    # extract_acc(tax_id=1282)
-    # extract_acc_children(tax_id=1279)
+    #create_populate()
+    #extract_acc(tax_id=1282)
+    #extract_acc_children(tax_id=1279)
 
     plac.call(run)
