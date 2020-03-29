@@ -39,7 +39,6 @@ def create():
     # Create Index
     Nodes.add_index(Nodes.rank)
     Names.add_index(Names.name)
-    Accessions.add_index(Accessions.acc)
 
     db.connect()
     db.create_tables([Nodes, Names, Accessions])
@@ -117,8 +116,7 @@ def parse_accession(fname):
         for row in stream:
             acc, acc_version = row[0], row[1]
             tax_id, gi_id = int(row[2]), int(row[3])
-            entry = dict(acc=acc, acc_version=acc_version,
-                         taxa=tax_id, gi_id=gi_id)
+            entry = dict(acc=acc, acc_version=acc_version, taxa=tax_id, gi_id=gi_id)
             yield entry
 
     source = generate()
@@ -152,14 +150,13 @@ def extract_acc_children(tax_id):
 
 
 def extract_names(tax_id):
-
     # Get Name, taxid
     query = (Names
              .select(Nodes, Names)
              .join(Nodes)
              .where(Names.taxa.tax_id == tax_id)
-
              )
+
     if not query.exists():
         print(f"No accessions found for {tax_id}")
         sys.exit()
@@ -172,10 +169,9 @@ def extract_acc(tax_id):
     """
     Extracts sequence accessions corresponding to a taxid.
     """
-
     query = (Accessions
              .select(Nodes, Accessions)
-             .join( Nodes)
+             .join(Nodes)
              .where(Accessions.taxa.tax_id == tax_id)
              )
 
@@ -226,8 +222,8 @@ def run(taxid, child=False):
 
 
 if __name__ == "__main__":
-    #create_populate()
-    #extract_acc(tax_id=1282)
-    #extract_acc_children(tax_id=1279)
+    # create_populate()
+    # extract_acc(tax_id=1282)
+    # extract_acc_children(tax_id=1279)
 
     plac.call(run)
