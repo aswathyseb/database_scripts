@@ -54,7 +54,6 @@ def printer(funct):
     t1 = time.time()
     final = t1 - t0
 
-
     print(f"{funct.__name__}:", "{0:.3f} microseconds".format(final))
     print(len(objs), "Total objects")
     print()
@@ -75,7 +74,7 @@ def populate_db(model, fname):
             for b in boss:
                 node = get(b.pk).add_child(name=row['name'])
 
-    print("Tables are now populated")
+    print(f"{model.__name__} is now populated")
     return
 
 def run_queries(modelname, node_name):
