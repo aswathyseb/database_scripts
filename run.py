@@ -1,4 +1,5 @@
 import django
+import time
 
 from django.conf import settings
 from django.core.management import call_command
@@ -28,8 +29,7 @@ django.setup()
 
 # Import all local models once Django has been setup
 
-from taxonomy_modeling.models import MPtree
-from taxonomy_modeling.models import NStree
+from taxonomy_modeling.models import MPtree, NStree, ALtree
 import csv
 
 
@@ -39,23 +39,25 @@ def add_to_db(fname):
     """
     populate_db(MPtree, fname)
     populate_db(NStree, fname)
+    populate_db(ALtree, fname)
     return
 
 
-def test_queries():
-    """
-    Run simple queries to test performance of different tree representations.
-    """
+def printer(funct):
+    t0 = time.time()
 
-    print("Queries with MPtree")
-    run_queries(MPtree, "Chuck")
+    objs = funct()
 
-    print("----------------------")
+    #for o in objs:
+    #    foo = o.name
 
-    print("Queries with NStree")
-    queries_NStree(NStree, "Chuck")
+    t1 = time.time()
+    final = t1 - t0
 
-    return
+
+    print(f"{funct.__name__}:", "{0:.3f} microseconds".format(final))
+    print(len(objs), "Total objects")
+    print()
 
 
 def populate_db(model, fname):
@@ -85,51 +87,16 @@ def run_queries(modelname, node_name):
     name = node_name
     node = modelname.objects.filter(name=name)[0]
 
-    print(f"Children of {name}")
-    children = node.get_children()
-    for c in children:
-        print(c.name)
+    # Functions to test.
+    print(f"Testing {modelname.__name__}\n")
+    children = node.get_children
+    desc = node.get_descendants
+    anc = node.get_ancestors
 
-    print("----------------------")
-    print(f"Descendents of {name}")
-    desc = node.get_descendants()
-    for d in desc:
-        print(d.name)
-
-    print("----------------------")
-
-    # Select all ancestors of a given node.
-    anc = node.get_ancestors()
-    print(f"All ancestors of {name}")
-    for a in anc:
-        print(a.name)
-
-    print("----------------------")
-    # Get parents of a given node.
-    p = node.get_parent()
-    print(f"Parent of {name}")
-    print(p.name)
-
-    return
-
-
-def queries_NStree(modelname, node_name):
-    """
-        Run simple queries to test performance of different tree representations.
-        """
-    # Select all descendants of a given node.
-    name = node_name
-    node = modelname.objects.filter(name=name)[0]
-
-    print(name, node)
-    left = node.lft
-    right = node.rgt
-    print(f"Left and right are {left} and {right}")
-
-    print("--------------------")
-
-    run_queries(modelname, node_name)
-
+    # Print time
+    printer(children)
+    printer(desc)
+    printer(anc)
     return
 
 
@@ -169,4 +136,9 @@ if __name__ == '__main__':
 
     # Test queries once database is populated.
     if test:
-        test_queries()
+        run_queries(MPtree, "Chuck")
+        print("---------------------")
+        run_queries(NStree, "Chuck")
+        print("---------------------")
+        run_queries(ALtree, "Chuck")
+
