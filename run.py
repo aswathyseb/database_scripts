@@ -50,7 +50,9 @@ def test_queries():
     print("Queries with MPtree")
     run_queries(MPtree, "Chuck")
 
-    print("\n\nQueries with NStree")
+    print("----------------------")
+
+    print("Queries with NStree")
     queries_NStree(NStree, "Chuck")
 
     return
@@ -63,44 +65,16 @@ def populate_db(model, fname):
 
     for row in stream:
 
-        print("Row is ", row)
-
         # Add root
         if row['boss'] == 'NULL':
             root = model.add_root(name=row['name'])
-            print("root is", root)
         else:
             boss = model.objects.filter(name=row['boss'])
             for b in boss:
-                print("Boss is ", get(b.pk))
                 node = get(b.pk).add_child(name=row['name'])
-                print("Node is ", node)
 
+    print("Tables are now populated")
     return
-
-
-def populate_MPtree(fname):
-    get = lambda node_id: MPtree.objects.get(pk=node_id)
-
-    stream = csv.DictReader(open(fname), delimiter="\t")
-
-    for row in stream:
-
-        print("Row is ", row)
-
-        # Add root
-        if row['boss'] == 'NULL':
-            root = MPtree.add_root(name=row['name'])
-            print("root is", root)
-        else:
-            boss = MPtree.objects.filter(name=row['boss'])
-            for b in boss:
-                print("Boss is ", get(b.pk))
-                node = get(b.pk).add_child(name=row['name'])
-                print("Node is ", node)
-
-    return
-
 
 def run_queries(modelname, node_name):
     """
