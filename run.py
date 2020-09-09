@@ -1,5 +1,5 @@
 import django
-import time
+import time, os, pprint
 
 from django.conf import settings
 from django.core.management import call_command
@@ -37,10 +37,73 @@ def add_to_db(fname):
     """
     Add contents of file to database
     """
+
     populate_db(MPtree, fname)
     populate_db(NStree, fname)
     populate_db(ALtree, fname)
     return
+
+
+def read_data(fname):
+    """
+    Reads a csv file and returns it as a list of dictionaries.
+    """
+    stream = csv.reader(open(fname), delimiter="\t")
+
+    store = list()
+    for idx, row in enumerate(stream):
+        name, parent = row
+
+        if not parent or name == parent:
+            parent = None
+
+        d = dict()
+        # d['id'], d['name'], d['parent'] = idx + 1, name, parent
+        d['name'], d['parent'] = name, parent
+        store.append(d)
+
+    return store
+
+
+def remove_empty(obj):
+    """
+    Input is a list of dictionaries where one key is 'children'
+    If the value of key 'children' is [], then it will be removed recursively.
+    The function returns the filtered list of dictionaries.
+    """
+    for i in obj:
+        if not i['children']:
+            del i['children']
+        else:
+            remove_empty(i['children'])
+    return obj
+
+
+def make_data_struct(data):
+    """
+    Makes treebeard specific data structure for bulk load.
+    from a list of dictionaries.
+    """
+
+    data_map = {}
+    for dat in data:
+        d = {'name': dat['name']}
+        # d = dat['name']
+        data_map[dat['name']] = {'data': d, 'children': []}
+
+    data_tree = []
+    for dat in data:
+
+        if dat['parent'] == dat['name'] or dat['parent'] is None:
+            data_tree.append(data_map[dat['name']])
+
+        else:
+            parent = data_map[dat['parent']]
+            parent['children'].append(data_map[dat['name']])
+
+    # remove empty list
+    data_tree = remove_empty(data_tree)
+    return data_tree
 
 
 def printer(funct):
@@ -48,34 +111,36 @@ def printer(funct):
 
     objs = funct()
 
-    #for o in objs:
-    #    foo = o.name
+    # for o in objs:
+    #     foo = o.name
+    #     print(foo)
 
     t1 = time.time()
     final = t1 - t0
 
-    print(f"{funct.__name__}:", "{0:.3f} microseconds".format(final))
+    print(f"{funct.__name__}:", "{0:.3f} seconds".format(final))
     print(len(objs), "Total objects")
     print()
 
 
 def populate_db(model, fname):
-    get = lambda node_id: model.objects.get(pk=node_id)
+    # Read data as a list of dictionaries.
+    data = read_data(fname)
 
-    stream = csv.DictReader(open(fname), delimiter="\t")
+    # Create a nested dictionary with keys 'data' and 'children' as required by treebeard load_bulk()
+    data_tree = make_data_struct(data)
 
-    for row in stream:
+    # load data
+    print(f"Populating {model.__name__}.")
+    t0 = time.time()
+    model.load_bulk(bulk_data=data_tree, parent=None)
+    t1 = time.time()
+    final = t1 - t0
 
-        # Add root
-        if row['boss'] == 'NULL':
-            root = model.add_root(name=row['name'])
-        else:
-            boss = model.objects.filter(name=row['boss'])
-            for b in boss:
-                node = get(b.pk).add_child(name=row['name'])
-
-    print(f"{model.__name__} is now populated")
+    #print(f"{model.__name__} is now populated.")
+    print("Done. Time taken : {0:.3f} seconds.".format(final))
     return
+
 
 def run_queries(modelname, node_name):
     """
@@ -135,9 +200,9 @@ if __name__ == '__main__':
 
     # Test queries once database is populated.
     if test:
-        run_queries(MPtree, "Chuck")
+        node = "12333"
+        run_queries(MPtree, node)
         print("---------------------")
-        run_queries(NStree, "Chuck")
+        run_queries(NStree, node)
         print("---------------------")
-        run_queries(ALtree, "Chuck")
-
+        run_queries(ALtree, node)

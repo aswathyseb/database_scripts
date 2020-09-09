@@ -1,9 +1,12 @@
-name	boss
-Albert	NULL
+Albert	
 Bert	Albert
 Chuck	Albert
 Donna	Chuck
 Eddie	Chuck
 Fred	Chuck
+Kale	Chuck
 Jack	Fred
 Jane	Donna
+Mary	Jane
+Ally	Mary
+Mat	Mary
