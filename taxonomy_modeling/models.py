@@ -6,6 +6,7 @@ from treebeard.al_tree import AL_Node
 
 class MPtree(MP_Node):
     name = models.CharField(max_length=30)
+    parent = models.CharField(max_length=30)
 
     def __unicode__(self):
         return 'MPtree: %s' % self.name

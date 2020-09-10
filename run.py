@@ -1,10 +1,12 @@
 import django
 import time, os, pprint
+from collections import defaultdict
+
 
 from django.conf import settings
 from django.core.management import call_command
 
-DATABASE_NAME = "taxa.db"
+DATABASE_NAME = "taxa1.db"
 
 settings.configure(
     DEBUG=True,
@@ -32,16 +34,122 @@ django.setup()
 from taxonomy_modeling.models import MPtree, NStree, ALtree
 import csv
 
+LIMIT =10000
 
 def add_to_db(fname):
     """
     Add contents of file to database
     """
+    data = create_data(MPtree, fname, batch_size=LIMIT)
+    1/0
+    # data = make_relations_dict(data)
+    #
+    # fileds =  ['parent', 'depth', 'numchild', 'path']
+    # update_data(MPtree,fileds,data, batch_size=LIMIT )
 
-    populate_db(MPtree, fname)
-    populate_db(NStree, fname)
-    populate_db(ALtree, fname)
+
+    #populate_db(MPtree, fname)
+    #populate_db(NStree, fname)
+    #populate_db(ALtree, fname)
     return
+
+
+def create_data(model,fname, batch_size=LIMIT):
+    """
+    Insert nodes into database without any relationships.
+    Returns a dictionary of dictionaries with id and children for each node.
+    """
+
+    store = defaultdict(list)
+    stream = csv.reader(open(fname), delimiter="\t")
+    gen = gen_data(stream=stream, store=store)
+    nodes =model.objects.bulk_create(objs=gen, batch_size=batch_size)
+    print(f"{len(nodes)} nodes inserted.")
+
+    return store
+
+def gen_data(stream, store = {}):
+
+    for idx,row in enumerate(stream):
+        name, parent = row
+
+        if not parent or name == parent:
+            parent = 'root'
+
+        store[parent].append(name)
+        yield MPtree(name=name, parent= parent, depth=1, path=idx+1, numchild=0)
+
+
+def update_data(model, fields, data, batch_size):
+    gen = gen_update(model, data)
+    model.objects.bulk_update(objs=gen, fields=fields, batch_size=batch_size)
+
+
+def make_relations_dict(data):
+    """
+    Create a dictionary where each node has its parent and num of children.
+    """
+    def get_parents(data):
+        p = {}
+        for parent, children in data.items():
+            if len(children) == 1:
+                name = children[0]
+                p[name] = parent
+
+            else:
+                for child in children:
+                    p[child] = parent
+        return p
+
+    # get the parent of each node.
+    relations = get_parents(data)
+
+    # ge the numchild for each node.
+    for node, parent in relations.items():
+        k = {}
+        numchild = len(data[node]) if node in data else 0
+        k['numchild'] = numchild
+        k['parent'] = parent
+        relations[node] = k
+        
+    return relations
+
+def make_dict(**kwargs):
+    d={}
+    #print(parent, depth, path, numchild)
+    d['path'] = kwargs.get('path')
+    d['depth'] = kwargs.get('depth')
+    d['numchild'] = kwargs.get('numchild')
+    d['parent'] = kwargs.get('parent')
+    return d
+
+
+def gen_update(model, data):
+    attrs = dict()
+
+    nodes = {node.id :node for node in model.objects.all()}
+
+    for id, node in nodes.items():
+        name = node.name
+        # get numchild
+        numchild = data[name]['numchild']
+        parent = data[name]['parent']
+
+        print(id, name, parent, numchild)
+
+        if parent == "root":
+            depth, path = 1, '0001'
+            attrs[name] = make_dict(parent=parent, depth=depth, numchild=numchild, path=path)
+        else:
+            path = int(attrs[parent]['path']) + 1
+            depth =  attrs[parent]['depth'] + 1
+            attrs[node] = make_dict(parent=parent, depth=depth, numchild=numchild, path= path)
+
+        node.parent = parent
+        node.depth = depth
+        node.numchild = numchild
+        node.path = path
+        yield node
 
 
 def read_data(fname):
@@ -122,6 +230,19 @@ def printer(funct):
     print(len(objs), "Total objects")
     print()
 
+def test_tree(bulk_data):
+     parent = None
+     stack = [(parent, node) for node in bulk_data[::-1]]
+     print(stack)
+     while stack:
+         parent, node_struct = stack.pop()
+         node_data = node_struct['data'].copy()
+         print("***",parent)
+         print(node_struct)
+         print(node_data)
+         1/0
+
+
 
 def populate_db(model, fname):
     # Read data as a list of dictionaries.
@@ -129,11 +250,15 @@ def populate_db(model, fname):
 
     # Create a nested dictionary with keys 'data' and 'children' as required by treebeard load_bulk()
     data_tree = make_data_struct(data)
+    test_tree(data_tree)
+
 
     # load data
     print(f"Populating {model.__name__}.")
     t0 = time.time()
     model.load_bulk(bulk_data=data_tree, parent=None)
+    #relns_dict= bulk_create()
+    #update_tree(relns_dict)
     t1 = time.time()
     final = t1 - t0
 
