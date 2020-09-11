@@ -34,23 +34,19 @@ django.setup()
 from taxonomy_modeling.models import MPtree, NStree, ALtree
 import csv
 
-LIMIT =10000
+LIMIT =500
 
 def add_to_db(fname):
     """
     Add contents of file to database
     """
     data = create_data(MPtree, fname, batch_size=LIMIT)
-    1/0
+    
     # data = make_relations_dict(data)
     #
     # fileds =  ['parent', 'depth', 'numchild', 'path']
     # update_data(MPtree,fileds,data, batch_size=LIMIT )
 
-
-    #populate_db(MPtree, fname)
-    #populate_db(NStree, fname)
-    #populate_db(ALtree, fname)
     return
 
 
@@ -63,7 +59,7 @@ def create_data(model,fname, batch_size=LIMIT):
     store = defaultdict(list)
     stream = csv.reader(open(fname), delimiter="\t")
     gen = gen_data(stream=stream, store=store)
-    nodes =model.objects.bulk_create(objs=gen, batch_size=batch_size)
+    nodes = model.objects.bulk_create(objs=gen, batch_size=batch_size)
     print(f"{len(nodes)} nodes inserted.")
 
     return store
@@ -152,68 +148,6 @@ def gen_update(model, data):
         yield node
 
 
-def read_data(fname):
-    """
-    Reads a csv file and returns it as a list of dictionaries.
-    """
-    stream = csv.reader(open(fname), delimiter="\t")
-
-    store = list()
-    for idx, row in enumerate(stream):
-        name, parent = row
-
-        if not parent or name == parent:
-            parent = None
-
-        d = dict()
-        # d['id'], d['name'], d['parent'] = idx + 1, name, parent
-        d['name'], d['parent'] = name, parent
-        store.append(d)
-
-    return store
-
-
-def remove_empty(obj):
-    """
-    Input is a list of dictionaries where one key is 'children'
-    If the value of key 'children' is [], then it will be removed recursively.
-    The function returns the filtered list of dictionaries.
-    """
-    for i in obj:
-        if not i['children']:
-            del i['children']
-        else:
-            remove_empty(i['children'])
-    return obj
-
-
-def make_data_struct(data):
-    """
-    Makes treebeard specific data structure for bulk load.
-    from a list of dictionaries.
-    """
-
-    data_map = {}
-    for dat in data:
-        d = {'name': dat['name']}
-        # d = dat['name']
-        data_map[dat['name']] = {'data': d, 'children': []}
-
-    data_tree = []
-    for dat in data:
-
-        if dat['parent'] == dat['name'] or dat['parent'] is None:
-            data_tree.append(data_map[dat['name']])
-
-        else:
-            parent = data_map[dat['parent']]
-            parent['children'].append(data_map[dat['name']])
-
-    # remove empty list
-    data_tree = remove_empty(data_tree)
-    return data_tree
-
-
 def printer(funct):
     t0 = time.time()
 
@@ -229,43 +163,6 @@ def printer(funct):
     print(f"{funct.__name__}:", "{0:.3f} seconds".format(final))
     print(len(objs), "Total objects")
     print()
-
-def test_tree(bulk_data):
-     parent = None
-     stack = [(parent, node) for node in bulk_data[::-1]]
-     print(stack)
-     while stack:
-         parent, node_struct = stack.pop()
-         node_data = node_struct['data'].copy()
-         print("***",parent)
-         print(node_struct)
-         print(node_data)
-         1/0
-
-
-
-def populate_db(model, fname):
-    # Read data as a list of dictionaries.
-    data = read_data(fname)
-
-    # Create a nested dictionary with keys 'data' and 'children' as required by treebeard load_bulk()
-    data_tree = make_data_struct(data)
-    test_tree(data_tree)
-
-
-    # load data
-    print(f"Populating {model.__name__}.")
-    t0 = time.time()
-    model.load_bulk(bulk_data=data_tree, parent=None)
-    #relns_dict= bulk_create()
-    #update_tree(relns_dict)
-    t1 = time.time()
-    final = t1 - t0
-
-    #print(f"{model.__name__} is now populated.")
-    print("Done. Time taken : {0:.3f} seconds.".format(final))
-    return
-
 
 def run_queries(modelname, node_name):
     """
@@ -287,7 +184,6 @@ def run_queries(modelname, node_name):
     printer(desc)
     printer(anc)
     return
-
 
 if __name__ == '__main__':
     import argparse
