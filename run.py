@@ -5,7 +5,7 @@ from collections import defaultdict
 from django.conf import settings
 from django.core.management import call_command
 
-DATABASE_NAME = "employee.db"
+DATABASE_NAME = "taxa.db"
 
 settings.configure(
     DEBUG=True,
@@ -30,7 +30,7 @@ django.setup()
 
 # Import all local models once Django has been setup
 
-from taxonomy_modeling.models import MPtree, NStree, ALtree
+from taxonomy_modeling.models import MPtree
 import csv
 
 LIMIT = 500
@@ -40,21 +40,24 @@ def add_to_db(fname):
     """
     Add contents of file to database
     """
-    data = create_data(MPtree, fname, batch_size=LIMIT)
-    1/0
+    t0 = time.time()
+    data = read_data(fname)
 
     # For every node, get its name, parent, no.of children,
     # its position among sibling, path and depth.
 
     data = make_relations(data)
 
-    fileds = [ 'path', 'depth', 'numchild']
-    update_data(MPtree, fileds, data, batch_size=LIMIT)
+    t1 = time.time()
+    t = t1-t0
+    print("\nTime for reading data : {0:.3f} seconds". format(t))
+
+    create_data(MPtree, data, batch_size=LIMIT)
 
     return
 
 
-def create_data(model, fname, batch_size=LIMIT):
+def read_data(fname):
     """
     Insert nodes into database without any relationships.
     Returns a dictionary of dictionaries with id and children for each node.
@@ -62,14 +65,11 @@ def create_data(model, fname, batch_size=LIMIT):
 
     store = defaultdict(list)
     stream = csv.reader(open(fname), delimiter="\t")
-    gen = gen_data(stream=stream, store=store)
-    nodes = model.objects.bulk_create(objs=gen, batch_size=batch_size)
-    print(f"{len(nodes)} nodes inserted.")
-
+    get_data(stream=stream, store=store)
     return store
 
 
-def gen_data(stream, store=defaultdict(list)):
+def get_data(stream, store=defaultdict(list)):
     for idx, row in enumerate(stream):
         name, parent = row
 
@@ -77,7 +77,6 @@ def gen_data(stream, store=defaultdict(list)):
             parent = 'root'
 
         store[parent].append(name)
-        yield MPtree(name=name, depth=1, path=idx + 1, numchild=0)
 
 
 def modify_data(data):
@@ -153,13 +152,6 @@ def get_path(node, data, path=''):
 def make_relations(data):
     info = modify_data(data)
 
-
-    # for k, v in info.items():
-    #     parent = v['parent']
-    #     #siblings = info[parent]['numchild']
-    #     print("\t".join([k, v['node_pos'], parent, str(siblings)]))
-    # 1/0
-
     for node, attrs in info.items():
         path = get_path(node, info)
         depth = get_depth(node, info)
@@ -171,29 +163,31 @@ def make_relations(data):
     return info
 
 
-def update_data(model, fields, data, batch_size):
+def create_data(model, data, batch_size=LIMIT):
+    """
+    Insert nodes into database without any relationships.
+    Returns a dictionary of dictionaries with id and children for each node.
+    """
+    gen = gen_data(data)
+    t0 = time.time()
+    print(f"\nStarting to create data at time {time.ctime()}")
+    nodes = model.objects.bulk_create(objs=gen, batch_size=batch_size)
+    #print(f"{len(nodes)} nodes inserted.")
+    t1 = time.time()
+    print(f"Completed data insert at time {time.ctime()}")
+    t = t1-t0
+    print ("\nTime taken is {0:.3f} seconds".format(t))
 
-    # for k, v in data.items():
-    #     print(k, v['path'])
-    # 1/0
+    return nodes
 
-    gen = gen_update(model, data)
-    model.objects.bulk_update(objs=gen, fields=fields, batch_size=batch_size)
-    print(f"{model.__name__}  is updated successfully." )
+def gen_data(data):
 
-
-def gen_update(model, data):
-
-    nodes = [ node for node in model.objects.all()]
-
-    for  node in nodes:
-        name = node.name
-        attrs = data[name]
-
-        node.depth = attrs['depth']
-        node.numchild = attrs['numchild']
-        node.path = attrs['path']
-        yield node
+    for node, attrs in data.items():
+        name = attrs['name']
+        numchild = attrs['numchild']
+        path = attrs['path']
+        depth = attrs['depth']
+        yield MPtree(name=name, depth=depth, path=path, numchild=numchild)
 
 
 def printer(funct):
