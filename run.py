@@ -1,6 +1,5 @@
 import django
-import time, os, pprint
-from collections import defaultdict
+import time
 
 from django.conf import settings
 from django.core.management import call_command
@@ -31,136 +30,28 @@ django.setup()
 # Import all local models once Django has been setup
 
 from taxonomy_modeling.models import MPtree
-import csv
+from read import read_taxa
 
 LIMIT = 500
 
 
-def add_to_db(fname):
+def add_to_db(fname='', nodes='', names=''):
     """
     Add contents of file to database
     """
+
     t0 = time.time()
-    data = read_data(fname)
+    data = read_taxa(fname=fname, nodes=nodes, names=names,)
 
-    # For every node, get its name, parent, no.of children,
-    # its position among sibling, path and depth.
-
-    data = make_relations(data)
+    #for k, v in data.items():
+    #     print(k, v)
 
     t1 = time.time()
-    t = t1-t0
-    print("\nTime for reading data : {0:.3f} seconds". format(t))
-
+    t = t1 - t0
+    print("\nTime for reading data :  {0:.3f} seconds".format(t))
     create_data(MPtree, data, batch_size=LIMIT)
 
     return
-
-
-def read_data(fname):
-    """
-    Insert nodes into database without any relationships.
-    Returns a dictionary of dictionaries with id and children for each node.
-    """
-
-    store = defaultdict(list)
-    stream = csv.reader(open(fname), delimiter="\t")
-    get_data(stream=stream, store=store)
-    return store
-
-
-def get_data(stream, store=defaultdict(list)):
-    for idx, row in enumerate(stream):
-        name, parent = row
-
-        if not parent or name == parent:
-            parent = 'root'
-
-        store[parent].append(name)
-
-
-def modify_data(data):
-    """
-    Takes a dictionary of lists with parents as keys and children as values.
-    Returns a dictionary of dictionaries with node as the key.
-    For every node, its name, parent, its position among children, number of children
-    are returned.
-
-    """
-
-    store = {}
-    roots = []
-    for parent, children in data.items():
-        parent = parent if parent != "root" else None
-
-        def get_numchild(node, data):
-            k = {}
-            numchild = len(data[node]) if node in data else 0
-            k['numchild'] = numchild
-            k['name'] = node
-            return k
-
-        for idx, child in enumerate(children):
-            d = get_numchild(child, data)
-            d['parent'] = parent
-
-            roots.append(child) if parent is None else roots
-
-            # determines if its 1st child or 2nd child and so on,
-            # for root node child_pos denote the index of roots.
-
-            node_pos = idx + 1 if parent else roots.index(child) + 1
-            d['node_pos'] = str(node_pos).zfill(4)
-
-            #print(parent, child, node_pos)
-            store[child] = d
-
-    return store
-
-
-def get_depth(node, data, depth=1):
-    """
-    Recursively get depth.
-    """
-    attrs = data[node]
-    parent = attrs['parent']
-
-    if parent is None:
-        return depth
-    else:
-        depth += 1
-        return get_depth(parent, data, depth)
-
-
-def get_path(node, data, path=''):
-    """
-    Recursively get path
-    """
-    attrs = data[node]
-    parent = attrs['parent']
-    node_pos = attrs['node_pos']
-
-    if parent is None:
-        path = node_pos + path
-        return path
-
-    else:
-        path = node_pos + path
-        return get_path(parent, data, path)
-
-
-def make_relations(data):
-    info = modify_data(data)
-
-    for node, attrs in info.items():
-        path = get_path(node, info)
-        depth = get_depth(node, info)
-
-        attrs['depth'] = depth
-        attrs['path'] = path
-        info[node] = attrs
-
-    return info
 
 
 def create_data(model, data, batch_size=LIMIT):
@@ -169,25 +60,30 @@ def create_data(model, data, batch_size=LIMIT):
     Returns a dictionary of dictionaries with id and children for each node.
     """
     gen = gen_data(data)
+
     t0 = time.time()
     print(f"\nStarting to create data at time {time.ctime()}")
+
     nodes = model.objects.bulk_create(objs=gen, batch_size=batch_size)
-    #print(f"{len(nodes)} nodes inserted.")
+
     t1 = time.time()
     print(f"Completed data insert at time {time.ctime()}")
-    t = t1-t0
-    print ("\nTime taken is {0:.3f} seconds".format(t))
+
+    t = t1 - t0
+    print("\nTime taken is {0:.3f} seconds".format(t))
 
     return nodes
+
 
 def gen_data(data):
 
     for node, attrs in data.items():
-        name = attrs['name']
+        taxid = attrs['taxid']
         numchild = attrs['numchild']
         path = attrs['path']
         depth = attrs['depth']
-        yield MPtree(name=name, depth=depth, path=path, numchild=numchild)
+
+        yield MPtree(taxid=taxid, depth=depth, path=path, numchild=numchild)
 
 
 def printer(funct):
@@ -196,8 +92,8 @@ def printer(funct):
     objs = funct()
 
     for o in objs:
-         foo = o.name
-         print(foo)
+        foo = o.taxid
+        print(foo)
 
     t1 = time.time()
     final = t1 - t0
@@ -207,38 +103,26 @@ def printer(funct):
     print()
 
 
-def test_tree(bulk_data):
-    parent = None
-    stack = [(parent, node) for node in bulk_data[::-1]]
-    print(stack)
-    while stack:
-        parent, node_struct = stack.pop()
-        node_data = node_struct['data'].copy()
-        print("***", parent)
-        print(node_struct)
-        print(node_data)
-        1 / 0
-
-
-def run_queries(modelname, node_name):
+def run_queries(modelname, node):
     """
         Run simple queries to test performance of different tree representations.
     """
 
     # Select all descendants of a given node.
-    name = node_name
-    node = modelname.objects.filter(name=name)[0]
+    taxid = node
+    node = modelname.objects.filter(taxid=taxid)[0]
 
     # Functions to test.
-    print(f"Testing {modelname.__name__}\n")
-    children = node.get_children
+    #print(f"Testing {modelname.__name__}\n")
+    #children = node.get_children
     desc = node.get_descendants
-    #anc = node.get_ancestors
+    # anc = node.get_ancestors
 
     # Print time
-    printer(children)
+    #printer(children)
+    #print("------------")
     printer(desc)
-    #printer(anc)
+    # printer(anc)
     return
 
 
@@ -246,22 +130,40 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description='Process some integers.')
+
     parser.add_argument('--makemigrations', action='store_true',
                         help='Used to create migration files when models are changed in app.')
+
     parser.add_argument('--migrate', action='store_true',
                         help='Apply migrations to database')
 
-    parser.add_argument('--fname', type=str, help='Add the contents of file into database')
-
     parser.add_argument('--test', action='store_true',
-                        help='Run a test query using all three tree representations, and print results.')
+                        help='Run a test query and print results.')
+
+    parser.add_argument('--add', action='store_true',
+                        help="""Add data to the database. See --nodes_file, --names_file, 
+                        divisions_file to add data.""")
+
+    parser.add_argument('--fname', type=str, help="""Add the contents of file into database.\n
+    It is a two column file with node_id as the first column and parent_id as the second column.""")
+
+    parser.add_argument('--nodes', type=str, help='Add the contents of nodes.dmp into database')
+
+    parser.add_argument('--names', type=str, help='Add the contents of names.dmp into database')
+
+    parser.add_argument('--divisions', type=str, help='Add the contents of divisions.dmp into database')
+
 
     args = parser.parse_args()
 
     makemig = args.makemigrations
     migrate = args.migrate
+    add = args.add
 
     fname = args.fname
+    nodes = args.nodes
+    names = args.names
+    division = args.divisions
     test = args.test
 
     # Make any migrations neccessary first.
@@ -272,15 +174,29 @@ if __name__ == '__main__':
     if migrate:
         call_command('migrate', 'taxonomy_modeling')
 
+
     # Add to database after migrations are done.
-    if fname:
-        add_to_db(fname=fname)
+    if add:
+        if nodes and names:
+            add_to_db(nodes=nodes, names=names)
+
+        elif nodes:
+            add_to_db(nodes=nodes)
+
+        elif names:
+            add_to_db(names=names)
+
+        elif fname:
+            add_to_db(fname=fname)
+
+        else:
+            print("No data given")
 
     # Test queries once database is populated.
     if test:
-        node = "9605"
+        node = "10239" #"9605"
         run_queries(MPtree, node)
-        #print("---------------------")
-        #run_queries(NStree, node)
-        #print("---------------------")
-        #run_queries(ALtree, node)
+        # print("---------------------")
+        # run_queries(NStree, node)
+        # print("---------------------")
+        # run_queries(ALtree, node)
