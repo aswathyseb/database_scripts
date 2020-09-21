@@ -148,7 +148,7 @@ def gen_node(data, divisions):
 def printer(funct):
     t0 = time.time()
 
-    objs = funct()ls
+    objs = funct()
 
     for o in objs:
         foo = o.tax_id
