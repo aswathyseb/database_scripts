@@ -162,21 +162,7 @@ def printer(funct):
     print()
 
 
-def test_tree(bulk_data):
-    parent = None
-    stack = [(parent, node) for node in bulk_data[::-1]]
-    print(stack)
-    while stack:
-        parent, node_struct = stack.pop()
-        node_data = node_struct['data'].copy()
-        print("***", parent)
-        print(node_struct)
-        print(node_data)
-        1 / 0
-
-
 def get_desc(taxid):
-
     node = Node.objects.filter(tax_id=taxid).first()
     path = node.path
     depth = node.depth
@@ -192,31 +178,29 @@ def get_desc_name(taxid):
 
 
 def run_queries(taxid):
-    # Get all desc
-    t0 = time.time()
-    desc = get_desc(taxid)
-    print(f'{len(desc)} objects.')
-    for d in desc:
-         print( d.tax_id)
-    t1 = time.time()
-    t = t1-t0
-    print("Time taken", " {0:.3f} seconds".format(t))
-
-
-    print("-------------------")
-    # Get all desc with name.
+    # # Get all desc
+    # t0 = time.time()
+    # desc = get_desc(taxid)
+    # print(f'{len(desc)} objects.')
+    # for d in desc:
+    #     print(d.tax_id)
+    # t1 = time.time()
+    # t = t1 - t0
+    # print("Time taken", " {0:.3f} seconds".format(t))
+    #
+    # print("-------------------")
+    # # Get all desc with name.
 
     t0 = time.time()
     desc_name = get_desc_name(taxid)
     print(f'{len(desc_name)} objects.')
     for d in desc_name:
-         print( d.node.tax_id, d.name_txt)
+        print(d.node.tax_id, d.name_txt)
     t1 = time.time()
-    t = t1-t0
+    t = t1 - t0
     print("Time taken", " {0:.3f} seconds".format(t))
 
     return
-
 
 
 def run_queries1(modelname, node):
@@ -271,6 +255,8 @@ if __name__ == '__main__':
                         help="""Add data to the database. See --nodes_file, --names_file, 
                             divisions_file to add data.""")
 
+    parser.add_argument('--taxid', type=str, help='Input a taxid to test')
+
     parser.add_argument('--fname', type=str, help="""Add the contents of file into database.\n
     It is a two column file with node_id as the first column and parent_id as the second column.""")
 
@@ -294,6 +280,7 @@ if __name__ == '__main__':
     division = args.divisions
     test = args.test
     add = args.add
+    taxid = args.taxid
 
     # Make any migrations neccessary first.
     if makemig:
@@ -329,9 +316,10 @@ if __name__ == '__main__':
 
     # Test queries once database is populated.
     if test:
-        taxid = "9605"  # "10239" #"9605"  # 10239 #"742006"
+        taxid = taxid.strip() if taxid else "9605"
         run_queries(taxid)
-        #run_queries(Node, taxid)
+
+        # run_queries(Node, taxid)
         # run_queries(taxid)
         # print("---------------------")
         # run_queries(NStree, node)
