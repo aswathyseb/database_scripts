@@ -69,7 +69,6 @@ def get_node_pos(data):
                 node_pos = idx + 1
                 data[node]['node_pos'] = make_str(root_pos)
                 data[child]['node_pos'] = make_str(node_pos)
-
     return data
 
 
@@ -108,6 +107,7 @@ def get_path(node, data, path=''):
     attrs = data[node]
 
     parent = attrs['parent']
+
     node_pos = attrs['node_pos']
 
     if parent is None:
@@ -207,7 +207,7 @@ def read_nodes(fname):
             parent = 'root'
 
         children[parent].append(taxid)
-        d['taxid'] = int(taxid)
+        d['taxid'] = taxid  # int(taxid)
         d['rank'] = rank
         d['parent'] = parent
         d['children'] = []
@@ -229,6 +229,8 @@ def read_names(fname):
     for row in stream:
         row = [x.strip() for x in row]
         taxid, name_txt, uniq_name, name_class = row[:4]
+
+        uniq_name = uniq_name if uniq_name else name_txt
 
         d = {'taxid': taxid, 'name_txt': name_txt, 'uniq_name': uniq_name, 'name_class': name_class}
         store.append(d)

@@ -1,5 +1,5 @@
 import django
-import time
+import time, sys
 
 from django.conf import settings
 from django.core.management import call_command
@@ -35,44 +35,56 @@ from read import read_nodes, read_divisions, read_names
 LIMIT = 500
 
 
-def add_to_db(fname='', nodes='', names='', division=''):
+def add_to_db(nodes='', names='', division=''):
     """
     Add contents of file to database
     """
     t0 = time.time()
 
     # Add taxa categories to database (from divisions.dmp)
-    cdict = read_divisions(division)
+    div_data = read_divisions(division)
 
-    create_divisions(Division, cdict, batch_size=LIMIT)
+    divisions = create_divisions(div_data, batch_size=LIMIT)
 
-    divisions = {c.division_id: c for c in Division.objects.all()}
-
+    # Add nodes from nodes.dmp to database.
     node_data = read_nodes(fname=nodes)
-
-    # for k, v in node_data.items():
-    #     print(k, v)
-    # 1/0
 
     t1 = time.time()
     t = t1 - t0
     print("\nTime for reading data :  {0:.3f} seconds".format(t))
 
-    create_node(Node, node_data, batch_size=LIMIT, divisions=divisions)
+    nodes = create_node(node_data, batch_size=LIMIT, divisions=divisions)
 
-    nodes = {n.tax_id: n for n in Node.objects.all()}
-
+    # Add names from names.dmp to database.
     name_data = read_names(fname=names)
 
-    create_names(Name, name_data, batch_size=LIMIT, nodes=nodes)
+    names = create_names(name_data, batch_size=LIMIT)
+
+    syn_data = []
+
+    for item in name_data:
+        taxid = item['taxid']
+        uname = item['uniq_name']
+        # node = nodes[int(taxid)]
+        node = nodes[taxid]
+        name = names[uname]
+        syn_data.append([node, name])
+
+    create_synonyms(syn_data, batch_size=LIMIT)
+
+    print("Done!")
 
     return
 
 
-def create_divisions(model, data, batch_size=LIMIT):
+def create_divisions(data, batch_size=LIMIT):
     gen_div = gen_divisions(data)
-    model.objects.bulk_create(objs=gen_div, batch_size=batch_size)
-    return
+    objs = Division.objects.bulk_create(objs=gen_div, batch_size=batch_size)
+
+    # create a  dictionary of objects for easy lookup
+    divisions = {c.division_id: c for c in objs}
+
+    return divisions
 
 
 def gen_divisions(data):
@@ -83,34 +95,61 @@ def gen_divisions(data):
         yield Division(division_id=div_id, code=code, name=name)
 
 
-def create_names(model, data, batch_size=LIMIT, nodes={}):
-    gen_nam = gen_names(data, nodes)
+def create_synonyms(data, batch_size=LIMIT):
+    gen_syn = gen_synonyms(data)
 
-    print(f"\nStarting to create Names at time {time.ctime()}")
+    print(f"\nStarting to create Synonyms at time {time.ctime()}")
     t0 = time.time()
 
-    model.objects.bulk_create(objs=gen_nam, batch_size=batch_size)
+    objs = Synonym.objects.bulk_create(objs=gen_syn, batch_size=batch_size)
 
     t1 = time.time()
     t = t1 - t0
     print("\nTime taken is {0:.3f} seconds".format(t))
-    return
+    return objs
 
 
-def gen_names(data, nodes):
-    node, name_txt, uniq_name, name_class = "", "", "", ""
+def gen_synonyms(data_list):
+    for item in data_list:
+        node, name = item
+        yield Synonym(node=node, name=name)
 
+
+def create_names(data, batch_size=LIMIT):
+    # gen_nam = gen_names(data, nodes, collect)
+    gen_nam = gen_names(data)
+
+    print(f"\nStarting to create Names at time {time.ctime()}")
+    t0 = time.time()
+
+    Name.objects.bulk_create(objs=gen_nam, batch_size=batch_size)
+
+    t1 = time.time()
+    t = t1 - t0
+    print("\nTime taken is {0:.3f} seconds".format(t))
+
+    #  Name.objects.all() is used instead of the bulk_create returned list of objects
+    # because an AutoField primary key will not be set in bulk_create returned objects
+    # if the database is sqlite3. This is not the case with postgresql.
+    names = {n.unique_name: n for n in Name.objects.all()}
+
+    return names
+
+
+def gen_names(data):
     for item in data:
-        taxid = item['taxid']
-        name_txt = item['name_txt']
+        # taxid = item['taxid']
         uniq_name = item['uniq_name']
         name_class = item['name_class']
-        node = nodes[int(taxid)]
-        yield Name(node=node, name_txt=name_txt,
-                   unique_name=uniq_name, name_class=name_class)
+        # node = nodes[int(taxid)]
+        name = Name(unique_name=uniq_name, name_class=name_class)
+        # collect.append([node, name])
+        # collect.append([taxid, name])
+
+        yield name
 
 
-def create_node(model, data, batch_size=LIMIT, divisions={}):
+def create_node(data, batch_size=LIMIT, divisions={}):
     """
     Insert nodes into database without any relationships.
     Returns a dictionary of dictionaries with id and children for each node.
@@ -120,7 +159,7 @@ def create_node(model, data, batch_size=LIMIT, divisions={}):
     t0 = time.time()
     print(f"\nStarting to create Nodes at time {time.ctime()}")
 
-    model.objects.bulk_create(objs=gen, batch_size=batch_size)
+    objs = Node.objects.bulk_create(objs=gen, batch_size=batch_size)
 
     t1 = time.time()
     print(f"Completed data insert to Nodes  at time {time.ctime()}")
@@ -128,18 +167,21 @@ def create_node(model, data, batch_size=LIMIT, divisions={}):
     t = t1 - t0
     print("\nTime taken is {0:.3f} seconds".format(t))
 
-    return
+    # Create a dictionary for easy lookup
+    nodes = {n.tax_id: n for n in objs}
+
+    return nodes
 
 
 def gen_node(data, divisions):
     for node, attrs in data.items():
         taxid = attrs['taxid']
         numchild = attrs['numchild']
-        # parent = attrs['parent']
         path = attrs['path']
         depth = attrs['depth']
         rank = attrs['rank']
-        division = divisions[attrs['div_id']]
+        # division = divisions[attrs['div_id']]
+        division = divisions[str(attrs['div_id'])]
 
         yield Node(tax_id=taxid, depth=depth, path=path, numchild=numchild,
                    division=division, rank=rank)
@@ -169,73 +211,112 @@ def get_desc(taxid):
     return Node.objects.filter(path__startswith=path, depth__gte=depth).order_by('path')
 
 
-def get_desc_name(taxid):
+def get_desc_scientific_name(taxid):
     node = Node.objects.filter(tax_id=taxid).first()
     path = node.path
     depth = node.depth
-    names = Name.objects.filter(name_class='scientific name', node__path__startswith=path, node__depth__gte=depth)
+
+    names = Synonym.objects.filter(node__path__startswith=path, node__depth__gte=depth,
+                                   name__name_class="scientific name").order_by('node__path')
+
     return names
 
 
-def run_queries(taxid):
-    # # Get all desc
-    # t0 = time.time()
-    # desc = get_desc(taxid)
-    # print(f'{len(desc)} objects.')
-    # for d in desc:
-    #     print(d.tax_id)
-    # t1 = time.time()
-    # t = t1 - t0
-    # print("Time taken", " {0:.3f} seconds".format(t))
-    #
-    # print("-------------------")
-    # # Get all desc with name.
+def list_ids(ids):
+    """
+    Input ids is a string of taxids separated by comma.
+    Lists all descendant taxids.
+    """
+    taxids = ids.split(",")
 
-    t0 = time.time()
-    desc_name = get_desc_name(taxid)
-    print(f'{len(desc_name)} objects.')
-    for d in desc_name:
-        print(d.node.tax_id, d.name_txt)
-    t1 = time.time()
-    t = t1 - t0
-    print("Time taken", " {0:.3f} seconds".format(t))
+    for taxid in taxids:
+        desc = get_desc(taxid)
+        for d in desc:
+            print(d.tax_id)
+        print()
+
+
+def list_names(ids):
+    """
+    Input ids is a string of taxids separated by comma.
+    Lists all descendant taxids and their scientific names.
+    """
+    taxids = ids.split(",")
+
+    for taxid in taxids:
+        desc = get_desc_scientific_name(taxid)
+        for d in desc:
+            print(d.node.tax_id, d.name.unique_name)
+        print()
+
+
+def list_ranks(ids):
+    """
+    Input ids is a string of taxids separated by comma.
+    Lists all descendant taxids and their ranks in the lineage.
+    """
+    taxids = ids.split(",")
+
+    for taxid in taxids:
+        desc = get_desc(taxid)
+        for d in desc:
+            print(d.tax_id, d.rank)
+        print()
+
+
+def list_all(ids):
+    """
+    Input ids is a string of taxids separated by comma.
+    Lists all descendant taxids, their ranks in the lineage and their scientific names.
+    """
+    taxids = ids.split(",")
+
+    for taxid in taxids:
+        desc = get_desc_scientific_name(taxid)
+        for d in desc:
+            print(d.node.tax_id, d.node.rank, d.name.unique_name)
+        print()
+
+
+def list_commands(args):
+    if (args.show_name or args.show_rank) and not (args.ids):
+        print("\nids are required")
+        sys.exit()
+
+    if args.show_name and args.show_rank and args.ids:
+        list_all(args.ids)
+        return
+
+    if args.show_name and args.ids:
+        list_names(args.ids)
+        return
+
+    if args.show_rank and args.ids:
+        list_ranks(args.ids)
+        return
+
+    if args.ids:
+        list_ids(args.ids)
 
     return
 
 
-def run_queries1(modelname, node):
-    """
-        Run simple queries to test performance of different tree representations.
-    """
+def db_commands(args):
+    # Make any migrations necessary first.
+    if args.makemigrations:
+        call_command('makemigrations', 'taxa')
 
-    # Select all descendants of a given node.
-    taxid = node
-    node = modelname.objects.filter(tax_id=taxid).first()
+    # Apply any migrations that might have been made
+    if args.migrate:
+        call_command('migrate', 'taxa')
 
-    # Get parent
-    # parent_path=node.path[:len(node.path)- 4]
-    # parent_node = modelname.objects.filter(path=parent_path).first()
-    # print(parent_node.taxid)
+    # Add to database after migrations are done.
+    if args.add and not (args.nodes and args.names and args.divisions):
+        print("\n--nodes, --names, --divisions must be specified with add.")
+        sys.exit()
 
-
-    # Functions to test.
-    # children = node.get_children
-    # desc = node.get_descendants
-    desc = get_desc(modelname, node)
-    # anc = node.get_ancestors
-
-    # Print time
-    # printer(children)
-    # printer(desc)
-    # 1/0
-    # printer(anc)
-    t0 = time.time()
-
-    for d in desc:
-        print(d.tax_id)
-    t1 = time.time()
-    t = t1 - t0
-    print(f"{len(desc)} objects\n.Time taken is {t}")
+    if args.add and args.nodes and args.names and args.divisions:
+        add_to_db(nodes=args.nodes, names=args.names, division=args.divisions)
 
     return
 
@@ -243,85 +324,43 @@ def run_queries1(modelname, node):
 if __name__ == '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser = argparse.ArgumentParser(usage="python run.py <command>")
 
-    parser.add_argument('--makemigrations', action='store_true',
-                        help='Used to create migration files when models are changed in app.')
+    # General sub-command parser object
+    subparsers = parser.add_subparsers(title='subcommands', description='valid subcommands', dest="cmd")
 
-    parser.add_argument('--migrate', action='store_true',
-                        help='Apply migrations to database')
+    # Specific sub-command parsers
+    parser_db = subparsers.add_parser('database', help="Database operations")
+    parser_list = subparsers.add_parser('list', help="List taxon tree of given taxids")
 
-    parser.add_argument('--add', action='store_true',
-                        help="""Add data to the database. See --nodes_file, --names_file, 
-                            divisions_file to add data.""")
+    # Assign the execution functions
+    parser_list.set_defaults(func=list_commands)
+    parser_db.set_defaults(func=db_commands)
 
-    parser.add_argument('--taxid', type=str, help='Input a taxid to test')
+    # Add database command-specific options
+    parser_db.add_argument('--makemigrations', action='store_true',
+                           help='Used to create migration files when models are changed in app.')
 
-    parser.add_argument('--fname', type=str, help="""Add the contents of file into database.\n
-    It is a two column file with node_id as the first column and parent_id as the second column.""")
+    parser_db.add_argument('--migrate', action='store_true',
+                           help='Apply migrations to database')
 
-    parser.add_argument('--nodes', type=str, help='Add the contents of nodes.dmp into database')
+    parser_db.add_argument('--add', action='store_true',
+                           help="""Add data to the database. --nodes, --names and --divisions must be specified along with this.""")
 
-    parser.add_argument('--names', type=str, help='Add the contents of names.dmp into database')
+    parser_db.add_argument('--nodes', type=str, help='Add the contents of nodes.dmp into database')
 
-    parser.add_argument('--test', action='store_true',
-                        help='Run a test query using all three tree representations, and print results.')
+    parser_db.add_argument('--names', type=str, help='Add the contents of names.dmp into database')
 
-    parser.add_argument('--divisions', type=str, help='Add the contents of divisions.dmp into database')
+    parser_db.add_argument('--divisions', type=str, help='Add the contents of divisions.dmp into database')
 
+    # Add list command-specific options
+    parser_list.add_argument('--ids', type=str, help="""Input taxid. Multiple values should be separated by comma.""")
+
+    parser_list.add_argument('-n', '--show_name', action='store_true', help='Output scientific name.')
+    parser_list.add_argument('-r', '--show_rank', action='store_true', help='Output rank.')
+
+    # Parse arguments
     args = parser.parse_args()
 
-    makemig = args.makemigrations
-    migrate = args.migrate
-
-    fname = args.fname
-    nodes = args.nodes
-    names = args.names
-    division = args.divisions
-    test = args.test
-    add = args.add
-    taxid = args.taxid
-
-    # Make any migrations neccessary first.
-    if makemig:
-        call_command('makemigrations', 'taxa')
-
-    # Apply any migrations that might have been made
-    if migrate:
-        call_command('migrate', 'taxa')
-
-    # Add to database after migrations are done.
-    if add:
-
-        if nodes and names and division:
-            add_to_db(nodes=nodes, names=names, division=division)
-
-        elif nodes and names:
-            add_to_db(nodes=nodes, names=names)
-
-        elif nodes:
-            add_to_db(nodes=nodes)
-
-        elif names:
-            add_to_db(names=names)
-
-        elif fname:
-            add_to_db(fname=fname)
-
-        elif division:
-            add_to_db(division=division)
-
-        else:
-            print("No data given.")
-
-    # Test queries once database is populated.
-    if test:
-        taxid = taxid.strip() if taxid else "9605"
-        run_queries(taxid)
-
-        # run_queries(Node, taxid)
-        # run_queries(taxid)
-        # print("---------------------")
-        # run_queries(NStree, node)
-        # print("---------------------")
-        # run_queries(ALtree, node)
+    # Invoke the function
+    args.func(args)
