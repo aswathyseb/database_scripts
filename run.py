@@ -1,5 +1,6 @@
 import django
 import time, sys
+from functools import wraps
 
 from django.conf import settings
 from django.core.management import call_command
@@ -35,31 +36,44 @@ from read import read_nodes, read_divisions, read_names
 LIMIT = 500
 
 
+def time_it(func):
+    @wraps(func)
+    def timer(*args, **kwargs):
+        start = time.time()
+        try:
+            return func(*args, **kwargs)
+        finally:
+            end = time.time()
+            diff = int(round((end - start), 1)) or 0.1
+            print(f"{func.__name__} execution time: {diff} seconds")
+
+    return timer
+
+
 def add_to_db(nodes='', names='', division=''):
     """
     Add contents of file to database
     """
-    t0 = time.time()
 
-    # Add taxa categories to database (from divisions.dmp)
+    # Read taxa divisions from divisions.dmp.
     div_data = read_divisions(division)
 
+    # Create divisions table.
     divisions = create_divisions(div_data, batch_size=LIMIT)
 
-    # Add nodes from nodes.dmp to database.
+    # Read nodes from nodes.dmp.
     node_data = read_nodes(fname=nodes)
 
-    t1 = time.time()
-    t = t1 - t0
-    print("\nTime for reading data :  {0:.3f} seconds".format(t))
-
+    # Create nodes table.
     nodes = create_node(node_data, batch_size=LIMIT, divisions=divisions)
 
-    # Add names from names.dmp to database.
+    # Reads names from names.dmp.
     name_data = read_names(fname=names)
 
+    # Create names table.
     names = create_names(name_data, batch_size=LIMIT)
 
+    # Get the node object corresponding to name for the creation of synonym table.
     syn_data = []
 
     for item in name_data:
@@ -70,6 +84,7 @@ def add_to_db(nodes='', names='', division=''):
         name = names[uname]
         syn_data.append([node, name])
 
+    # Create synonym table.
     create_synonyms(syn_data, batch_size=LIMIT)
 
     print("Done!")
@@ -95,17 +110,11 @@ def gen_divisions(data):
         yield Division(division_id=div_id, code=code, name=name)
 
 
+@time_it
 def create_synonyms(data, batch_size=LIMIT):
     gen_syn = gen_synonyms(data)
 
-    print(f"\nStarting to create Synonyms at time {time.ctime()}")
-    t0 = time.time()
-
     objs = Synonym.objects.bulk_create(objs=gen_syn, batch_size=batch_size)
-
-    t1 = time.time()
-    t = t1 - t0
-    print("\nTime taken is {0:.3f} seconds".format(t))
     return objs
 
 
@@ -115,22 +124,17 @@ def gen_synonyms(data_list):
         yield Synonym(node=node, name=name)
 
 
+@time_it
 def create_names(data, batch_size=LIMIT):
-    # gen_nam = gen_names(data, nodes, collect)
+    # Generate names.
     gen_nam = gen_names(data)
 
-    print(f"\nStarting to create Names at time {time.ctime()}")
-    t0 = time.time()
-
     Name.objects.bulk_create(objs=gen_nam, batch_size=batch_size)
-
-    t1 = time.time()
-    t = t1 - t0
-    print("\nTime taken is {0:.3f} seconds".format(t))
 
     #  Name.objects.all() is used instead of the bulk_create returned list of objects
     # because an AutoField primary key will not be set in bulk_create returned objects
     # if the database is sqlite3. This is not the case with postgresql.
+
     names = {n.unique_name: n for n in Name.objects.all()}
 
     return names
@@ -149,23 +153,16 @@ def gen_names(data):
         yield name
 
 
+@time_it
 def create_node(data, batch_size=LIMIT, divisions={}):
     """
     Insert nodes into database without any relationships.
     Returns a dictionary of dictionaries with id and children for each node.
     """
+    # Generate node.
     gen = gen_node(data, divisions)
 
-    t0 = time.time()
-    print(f"\nStarting to create Nodes at time {time.ctime()}")
-
     objs = Node.objects.bulk_create(objs=gen, batch_size=batch_size)
-
-    t1 = time.time()
-    print(f"Completed data insert to Nodes  at time {time.ctime()}")
-
-    t = t1 - t0
-    print("\nTime taken is {0:.3f} seconds".format(t))
 
     # Create a dictionary for easy lookup
     nodes = {n.tax_id: n for n in objs}
@@ -187,95 +184,90 @@ def gen_node(data, divisions):
                    division=division, rank=rank)
 
 
-def printer(funct):
-    t0 = time.time()
-
-    objs = funct()
-
-    for o in objs:
-        foo = o.tax_id
-        print(foo)
-
-    t1 = time.time()
-    final = t1 - t0
-
-    print(f"{funct.__name__}:", "{0:.3f} seconds".format(final))
-    print(len(objs), "Total objects")
-    print()
-
-
-def get_desc(taxid):
-    node = Node.objects.filter(tax_id=taxid).first()
-    path = node.path
-    depth = node.depth
-    return Node.objects.filter(path__startswith=path, depth__gte=depth).order_by('path')
-
-
-def get_desc_scientific_name(taxid):
-    node = Node.objects.filter(tax_id=taxid).first()
-    path = node.path
-    depth = node.depth
-
-    names = Synonym.objects.filter(node__path__startswith=path, node__depth__gte=depth,
-                                   name__name_class="scientific name").order_by('node__path')
-
-    return names
-
-
-def list_ids(ids):
+def list_values(ids):
     """
-    Input ids is a string of taxids separated by comma.
-    Lists all descendant taxids.
+    Query that returns taxid, rank and scientific-name for all descendants of each taxid.
+    Input is comma separated string of taxids
     """
+
+    # Get the arguments
+
     taxids = ids.split(",")
 
-    for taxid in taxids:
-        desc = get_desc(taxid)
-        for d in desc:
-            print(d.tax_id)
-        print()
+    # Extract node.path and node.depth for each taxid.
+    nodes = Node.objects.filter(tax_id__in=taxids).values('path', 'depth')
+
+    for node in nodes:
+        # Get the path and depth of each node.
+        path = node['path']
+        depth = node['depth']
+
+        # Get all descendants and their scientific name.
+        names = Synonym.objects.filter(node__path__startswith=path, node__depth__gte=depth,
+                                       name__name_class="scientific name").order_by('node__path').values('node__tax_id',
+                                                                                                         'node__rank',
+                                                                                                         'name__unique_name')
+        yield names
 
 
+@time_it
 def list_names(ids):
     """
-    Input ids is a string of taxids separated by comma.
-    Lists all descendant taxids and their scientific names.
+    Input is a comma separated list of taxids.
+    Prints all descendant taxids and their names.
     """
-    taxids = ids.split(",")
+    objs = list_values(ids)
 
-    for taxid in taxids:
-        desc = get_desc_scientific_name(taxid)
-        for d in desc:
-            print(d.node.tax_id, d.name.unique_name)
+    for obj in objs:
+        for o in obj:
+            print(o['node__tax_id'], o['name__unique_name'])
         print()
 
 
-def list_ranks(ids):
-    """
-    Input ids is a string of taxids separated by comma.
-    Lists all descendant taxids and their ranks in the lineage.
-    """
-    taxids = ids.split(",")
-
-    for taxid in taxids:
-        desc = get_desc(taxid)
-        for d in desc:
-            print(d.tax_id, d.rank)
-        print()
-
-
+@time_it
 def list_all(ids):
     """
-    Input ids is a string of taxids separated by comma.
-    Lists all descendant taxids, their ranks in the lineage and their scientific names.
+    Input is a comma separated list of taxids.
+    Prints all descendant taxids and their names.
     """
+    objs = list_values(ids)
+
+    for obj in objs:
+        for o in obj:
+            print(o['node__tax_id'], o['node__rank'], o['name__unique_name'])
+        print()
+
+
+@time_it
+def list_ranks(ids):
     taxids = ids.split(",")
 
-    for taxid in taxids:
-        desc = get_desc_scientific_name(taxid)
-        for d in desc:
-            print(d.node.tax_id, d.node.rank, d.name.unique_name)
-        print()
+    nodes = Node.objects.filter(tax_id__in=taxids).values('path', 'depth')
+
+    for node in nodes:
+        # Get the path and depth of each node.
+        path = node['path']
+        depth = node['depth']
+        vals = Node.objects.filter(path__startswith=path, depth__gte=depth).order_by('path').values('tax_id', 'rank')
+
+        for v in vals:
+            print(v['tax_id'], v['rank'])
+
+
+@time_it
+def list_ids(ids):
+    taxids = ids.split(",")
+
+    nodes = Node.objects.filter(tax_id__in=taxids).values('path', 'depth')
+
+    for node in nodes:
+        # Get the path and depth of each node.
+        path = node['path']
+        depth = node['depth']
+        vals = Node.objects.filter(path__startswith=path, depth__gte=depth).order_by('path').values('tax_id')
+
+        for v in vals:
+            print(v['tax_id'])
 
 
 def list_commands(args):

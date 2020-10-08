@@ -19,7 +19,7 @@ class Name(models.Model):
     Tables denotes the different types of names associated with a taxid.
     It is populated using names.dmp file.
     """
-    # uid = models.CharField(max_length=100, primary_key=True)
+
     unique_name = models.CharField(max_length=50)
     name_class = models.CharField(max_length=50)
 
@@ -30,6 +30,10 @@ class Node(MP_Node):
     In addition to the fields below path, depth, numchild are also available for each node.
     It is populated with nodes.dmp file.
     """
+
+    # path = models.CharField(max_length=255, unique=True)
+    # depth = models.PositiveIntegerField()
+    # numchild = models.PositiveIntegerField(default=0)
 
     tax_id = models.IntegerField(primary_key=True)
     rank = models.CharField(max_length=50)

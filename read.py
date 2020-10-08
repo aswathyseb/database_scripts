@@ -9,7 +9,7 @@ import csv
 
 def add_node_attrs(data):
     # For every node get its node position among its siblings.
-    # ie, 1st cgild or 2nd child and so on.
+    # ie, 1st child or 2nd child and so on.
     # This needs to be called before getting path and depth
     data = get_node_pos(data)
 
@@ -22,8 +22,8 @@ def get_node_pos(data):
     """
     For each node, get its position among siblings.
     ie, if its 1st child, 2nd child and so on.
-    :param data:
-    :return:
+    Node position is denoted by a 4 character string
+    eg: if 0001 is the root, 1st child will be 00010001, second child will be 00010002 and so on.
     """
 
     roots = []
@@ -40,35 +40,34 @@ def get_node_pos(data):
         numchild = len(children) if children else 0
         data[node]['numchild'] = numchild
 
-        parent = parent if parent != "root" else None
+        # Add all roots to a list, so that they can have different origin in path
+        # Needed if there are multiple roots in the tree.
+        roots.append(node) if parent is None and node not in roots else roots
 
         for idx, child in enumerate(children):
 
-            # add all roots to a list, so that they can have different origin in path
-            # Needed if there are multiple roots in the tree.
-            roots.append(node) if parent is None and node not in roots else roots
-
             # Get the node position. ie,
             # determines if the node is 1st child or 2nd child and so on,
-            # For root node child_pos denote the index of roots.
+            # For root node, node_pos denote the index of roots.
 
             if parent:
-
                 node_pos = idx + 1
-                str(node_pos).zfill(4)
                 data[child]['node_pos'] = make_str(node_pos)
+
             else:
 
-                # Make parent None.
-                data[node]['parent'] = None
+                # If no parent, set the position of the root node and all its children.
 
-                # Get the position of root.
+                # Get the position of the node among roots.
                 root_pos = roots.index(node) + 1
 
-                # Get the child position for each of its children.
-                node_pos = idx + 1
+                # Set the node position of root.
                 data[node]['node_pos'] = make_str(root_pos)
+
+                # Set the node position of child.
+                node_pos = idx + 1
                 data[child]['node_pos'] = make_str(node_pos)
+
     return data
 
 
@@ -76,6 +75,7 @@ def get_depth_path(data):
     """
     Get depth of the node and the full path upto the node.
     """
+
     for node, attrs in data.items():
         path = get_path(node, data)
         depth = get_depth(node, data)
@@ -110,61 +110,28 @@ def get_path(node, data, path=''):
 
     node_pos = attrs['node_pos']
 
+    path = node_pos + path
+
     if parent is None:
-        path = node_pos + path
         return path
 
     else:
-        path = node_pos + path
         return get_path(parent, data, path)
 
 
-def add_keys_to_dict(store, **kwargs):
-    d = {}
-
-    for key in kwargs:
-        if key == "children":
-            d[key] = []
-        else:
-            d[key] = ""
-
-    for k in store:
-        store[k].update(d)
-        store[k]['taxid'] = k
-
-    return store
-
-
 def update_children(data, children):
+    """
+    This function updates the children of a node in data dict.
+    Data is a defaultdict(dict) with node-taxid as the key.
+    Children is a dictionary of lists with node-taxid as the key and all its children as values.
+
+    """
     for node, attrs in data.items():
         if node in children:
+            # Add the children to the children list for the node.
             attrs['children'].extend(children[node])
             data[node] = attrs
     return data
-
-
-def read_test_data(fname):
-    stream = csv.reader(open(fname), delimiter="\t")
-    children = defaultdict(list)
-    collect = defaultdict(dict)
-
-    for row in stream:
-        d = {}
-        taxid, parent = row
-
-        if not parent or taxid == parent:
-            parent = 'root'
-
-        d['taxid'] = taxid
-        d['parent'] = parent
-        d['children'] = []
-
-        collect[taxid] = d
-        children[parent].append(taxid)
-
-        # update children
-    store = update_children(collect, children)
-    return store
 
 
 def read_divisions(fname):
@@ -203,10 +170,14 @@ def read_nodes(fname):
         taxid, parent, rank = taxid.strip(), parent.strip(), rank.strip()
         embl_code, div_id = embl_code.strip(), div_id.strip()
 
+        # Set the parent of the root to None.
+        # A node is root, if it does not have a parent or parent is same as the node.
         if not parent or taxid == parent:
-            parent = 'root'
+            parent = None
 
+        # collect children for each parent node.
         children[parent].append(taxid)
+
         d['taxid'] = taxid  # int(taxid)
         d['rank'] = rank
         d['parent'] = parent
@@ -217,6 +188,7 @@ def read_nodes(fname):
     # update children
     store = update_children(store, children)
 
+    # Add depth, path and numchild for a node.
     store = add_node_attrs(store)
 
     return store
@@ -241,39 +213,26 @@ def read_names(fname):
 if __name__ == '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser(description='Process some integers.')
-
-    parser.add_argument('--fname', type=str, help="""Add the contents of file into database.\n
-    It is a two column file with node_id as the first column and parent_id as the second column.""")
+    parser = argparse.ArgumentParser(description='')
 
     parser.add_argument('--nodes', type=str, help='Add the contents of nodes.dmp into database')
 
     parser.add_argument('--names', type=str, help='Add the contents of names.dmp into database')
 
-    parser.add_argument('--test', action='store_true',
-                        help='Run a test query using all three tree representations, and print results.')
-
     parser.add_argument('--divisions', type=str, help='Add the contents of divisions.dmp into database')
 
     args = parser.parse_args()
 
-    fname = args.fname
     nodes = args.nodes
     names = args.names
     division = args.divisions
-    test = args.test
 
     # Add to database after migrations are done.
-
-
     if nodes:
         data = read_nodes(fname=nodes)
 
     elif names:
         data = read_names(fname=names)
-
-    elif fname:
-        data = read_test_data(fname=fname)
 
     elif division:
         data = read_divisions(division)
